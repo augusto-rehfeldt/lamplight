@@ -21,12 +21,9 @@ import requests
 from dotenv import load_dotenv
 
 ROOT = pathlib.Path(__file__).resolve().parent
-# The writing engine (llm, pipeline, research, style) lives in the sibling
-# article-writer project; its .env holds the provider keys. A local .env wins.
-ENGINE = ROOT.parent / "article-writer"
-sys.path.insert(0, str(ENGINE))
+# The bundled writing engine (llm, pipeline, research, style) uses flat imports.
+sys.path.insert(0, str(ROOT / "engine"))
 load_dotenv(ROOT / ".env")
-load_dotenv(ENGINE / ".env")
 import llm
 import pipeline
 import research
@@ -35,6 +32,9 @@ import game_campaign as campaign
 
 WEB = ROOT / "game"
 DATA = ROOT / "output" / "lamplight"
+# Keep engine drafts and dropped books under the ignored output folder.
+pipeline.OUTPUT = DATA / "runs"
+research.LIBRARY = DATA / "engine-library"
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.RLock()
 # ponytail: one generation at a time because the existing router/language are global;

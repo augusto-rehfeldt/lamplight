@@ -92,7 +92,7 @@ so no commit or Git diff is available for this baseline.
 3. Campaign generation seeds a dossier and marks research complete before
    invoking the pipeline. `pipeline.do_research()` returns a completed dossier
    directly; `ask_library=False` alone is not a restore-time source boundary.
-   Preserve article-writer CLI defaults while validating game jobs explicitly.
+   Preserve the writing engine's CLI defaults while validating game jobs explicitly.
 4. `/api/state` accepts an arbitrary object. Campaign economy already lives in
    separate validated server actions, but coffee/treat state is client-owned.
    New tutorial/preferences endpoints must not accept quest/ending/reward flags.

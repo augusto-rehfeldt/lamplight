@@ -1,159 +1,230 @@
 # Lamplight
 
-A writing and research game: a pixel-art library with 1,200 Project Gutenberg books,
-a letter-writing campaign running from 1630 to 1930, and a native Godot client. It
-used to live inside `article-writer` and was split out on 2026-09-23.
+**A cozy pixel-art game about reading, thinking and writing your way home through
+three hundred years of ideas.**
+
+You were cataloguing papers in 2026 when an experimental time recorder failed. You
+wake in 1630, beside a village library, with a satchel, a laptop and a broken
+recorder. Nobody else came with you. Margot, the librarian, offers you a desk and a
+room upstairs. To get home you will read, ask good questions, argue with the great
+thinkers of each age and write articles that the village keeps for the generations
+that follow you, fifty years at a time, until 1930 and the last jump back to 2026.
 
 | | |
 |---|---|
-| ![Title menu](docs/screenshots/title-1280.png) | ![Town square](docs/screenshots/town-1920.png) |
-| ![Print shop](docs/screenshots/workshop-1920.png) | ![Village map](docs/screenshots/map-1280.png) |
-| ![Debate with Galileo](docs/screenshots/debate-1280.png) | ![Thinker portraits](docs/screenshots/portraits-thinkers-1920.png) |
+| ![Title screen](docs/screenshots/title-1280.png) | ![The town square](docs/screenshots/town-1920.png) |
+| ![Check your understanding](docs/screenshots/learning-1280.png) | ![The garden reading circle, 1630](docs/screenshots/thinker-1920.png) |
+| ![Debating Galileo](docs/screenshots/debate-1280.png) | ![The five-step writing workshop](docs/screenshots/workshop-question-1280.png) |
+| ![The print shop](docs/screenshots/workshop-1920.png) | ![The village map](docs/screenshots/map-1280.png) |
 
-**Dependency.** Text generation reuses the engine in `../article-writer` (`llm`,
-`pipeline`, `research`, `style`): `game_server.py` adds it to `sys.path` and loads
-its `.env` (a `.env` in this folder takes precedence). That project is not published
-yet, so AI generation needs it checked out next to this one. If the public API of
-those modules changes, run this project's tests as well.
+**[Download the latest release](https://github.com/augusto-rehfeldt/lamplight/releases/latest)**
+· **[Read the wiki](https://github.com/augusto-rehfeldt/lamplight/wiki)** for the full guide to
+eras, characters, mechanics and AI setup.
+
+## What kind of game is this?
+
+Lamplight is a slow, gentle game about learning. There is no combat, no fail state and
+no time pressure while you walk, talk or practise. Most of the game is ordinary work:
+you read short study notes, answer questions about them, talk the ideas over with the
+villagers, and turn what you learned into your own writing.
+
+- **Seven eras, one village.** The campaign runs 1630, 1680, 1730, 1780, 1830, 1880 and
+  1930. Each era has its own custodian, a descendant of the one before, and a featured
+  work: Galileo's moons, Boyle's furnace, Newton's prism, Franklin's electricity,
+  Shelley's *Frankenstein*, Darwin's *Origin* and Einstein's relativity.
+- **Learning that you can't skip.** Every study note has two comprehension questions.
+  A wrong answer explains the idea at no cost, and you can retry as often as you like.
+  You get the reward once, when you actually understand the note.
+- **Period thinkers, and only period thinkers.** In the garden reading circle you can
+  discuss a work with its author. The author has to be alive and already have
+  published it in the year you are in, and you have to have studied the work.
+  In 1630 that means Galileo and nobody else.
+- **A real writing workshop.** Your laptop and the print shop desk take you through a
+  saved five-step process: question, evidence, outline, draft and revision. Margot
+  reviews each step, and you decide when to approve it and move on.
+- **Letters across time.** Write to correspondents active in your era, wait days of
+  game time for the mail, and argue with the reply.
+- **Three ways to play.** *The Way Back* is the story campaign. *A Library of Your
+  Own* is free reading and writing with no deadlines. *The Contemporary Study* is a
+  present-day writing room.
+
+## Quick start
+
+Requires Python 3.11 or newer (developed on 3.14) and, for the main game, Godot 4.7.2 (the launcher can fetch it
+for you on Windows).
+
+```bash
+git clone https://github.com/augusto-rehfeldt/lamplight.git
+cd lamplight
+pip install -r requirements.txt
+
+python run_lamplight.py --setup   # Windows: download and verify portable Godot 4.7.2
+python run_lamplight.py           # play
+```
+
+On macOS or Linux, install Godot 4.7.2 yourself and pass it in with
+`python run_lamplight.py --godot /path/to/godot`, or put `godot` or `godot4` on your
+`PATH`.
+
+The launcher starts a small local Python service that owns your saves, the campaign
+rules and every AI request, then opens the game window. Keep it running while you play.
+
+### Connecting an AI
+
+The native game needs a language model. It plays your villagers and the historical
+thinkers, and it reviews your workshop steps. When you start, the **AI setup** screen
+lets you pick one of these:
+
+- **Ollama** on your own machine. There is no API fee, but you need a capable
+  computer and a downloaded chat model. The default endpoint is
+  `http://localhost:11434/v1`.
+- **Groq's free tier** or **specific OpenRouter free models**.
+- Any other **OpenAI-compatible** chat-completions endpoint that you have a key for.
+
+Press **Connect & benchmark**. Lamplight sends three small test tasks and accepts the
+model if it scores at least 80/100, with 75 per task and every critical rule passed.
+This check matters because a model that invents quotations or leaks future
+knowledge into 1680 would spoil the game. You have to pass it again each time you
+start the launcher or change your setup.
+
+Keys typed into the game stay in memory and are never written to a save. You can
+also put them in a `.env` file instead (see [`.env.example`](.env.example)).
+
+### Other launch options
+
+```bash
+python run_lamplight.py --editor   # open the project in Godot; press F5 to play
+python run_lamplight.py --hyper    # preload the AW_* provider from .env
+python run_lamplight.py --check    # headless integration test with temporary saves
+python run_lamplight.py --capture  # write screenshots to output/lamplight-engine-check/
+```
+
+## How to play
+
+| Action | Keys |
+|---|---|
+| Walk | WASD / arrow keys, or click the floor |
+| Run | Hold Shift |
+| Interact, talk, use | E, or click the person or object |
+| Journal, actions and settings | J or Esc |
+
+The village has four connected places:
+
+- **The library** has Margot, Miso the cat, the study notes, your laptop and the
+  time recorder.
+- **The town square** is where Noor, the bookbinder, works.
+- **The print shop** has Jules, the printer, plus the writing and postal desks.
+- **The garden** has Ada and Elias, and the period reading circle.
+
+Your journal always shows the next objective. A short tutorial introduces each
+system the first time you meet it, and you can replay it from the notebook.
+
+A typical era goes like this:
+
+1. Meet the custodian and read the era's **featured study note** at the library shelf.
+2. Answer both of its **learning questions**.
+3. Go out through the square to the print shop and the garden.
+4. **Discuss** the work with its author in the garden reading circle.
+5. Write a **learning note** of 45 words or more on your laptop that cites the source
+   as `[B1]`, `[B2]` and so on.
+6. **Publish** a longer sourced article at the print shop. From 1680 on, you also
+   need a delivered letter.
+7. **Calibrate** the time recorder by answering the era's evidence question, then
+   **cross** fifty years ahead.
+
+Crossing also needs the era's coins, paper, prestige and knowledge. You earn these
+from commissions, copyist shifts and mastered notes. Everything you write stays in
+your library.
+
+Full details are in the **[wiki](https://github.com/augusto-rehfeldt/lamplight/wiki)**.
+
+## The browser edition
+
+Lamplight also ships an earlier canvas-based browser edition with a much larger
+reading library:
+
+```bash
+python game_server.py      # then open http://127.0.0.1:8765
+```
+
+- **English book library.** This has 1,200 complete public-domain books from
+  [Project Gutenberg](https://www.gutenberg.org/), with at least 150 on each of six
+  shelves: science, philosophy, literature, history, politics and religion. Search,
+  take up to 12 books to your desk and read them in a full reader with chapters,
+  search, saved position and a night theme. Books are downloaded when you first open
+  them and then cached for offline reading.
+- **Letters across time.** This is the original English/Spanish campaign, where you
+  write commissions and trade letters with prepared (or AI-written) historical replies.
+- **A writing computer** with seven formats and automatic, guided or manual writing,
+  plus feedback from five resident readers.
+
+The browser edition reads its provider settings from `.env` (`AW_API_KEY`,
+`AW_BASE_URL`, `AW_MODEL_PRO`, `AW_MODEL_FLASH`), and you can change them later in its
+**Settings** screen. The campaign can be played there without any key or network.
+
+`python game_catalog.py` rebuilds the book catalog from Gutenberg's official RDF
+metadata. The catalog only accepts editions that Gutenberg marks as public domain in
+the USA, which does not settle their status elsewhere.
+
+## Honest limits
+
+- The historical encounters are **educational fiction**. The study notes are
+  original summaries, not quotations or full editions. AI replies are restricted to
+  period sources, but no filter catches every anachronism, so check claims against
+  the sources.
+- The workshop reviews are editorial guidance, not a certification of quality,
+  accuracy or originality. Lamplight never publishes anything outside the game.
+- The **AI usage** counters are local estimates. They are not your provider balance.
+- This is a playable development build. The village is four fixed-camera maps, and
+  the thinkers share a single visitor sprite in the world (each has their own
+  portrait in dialogue). Older browser saves are not migrated to the native game yet.
+
+## Saves and privacy
+
+Everything stays on your computer, under `output/`:
+`output/lamplight-native/` for the Godot game and `output/lamplight/` for the browser
+edition. Saves are written atomically and keep a `.bak` copy. Lamplight sends to your
+chosen AI provider only what a request needs: the prompt, the relevant source
+excerpts and, for workshop reviews, your current step. Keys are never sent to the
+game window or stored in saves, and a manuscript is only sent when you ask for feedback on it. The usage log records model names, timings and token counts, and nothing
+you wrote.
+
+## Project layout
+
+| Path | What it is |
+|---|---|
+| `godot/` | The native Godot 4.7.2 client (scenes, scripts, art, audio) |
+| `run_lamplight.py` | Launcher: fetches Godot, starts the local service, opens the game |
+| `game_native.py` | Local service for the native game: saves, rules, AI gateway |
+| `game_campaign.py` | Eras, thinkers, study notes, commissions and economy |
+| `lamplight_story.py` | Chapters, objectives and the time recorder trials |
+| `lamplight_learning.py` | Learning questions and mastery |
+| `lamplight_ai.py`, `lamplight_writing.py` | AI qualification benchmark and workshop steps |
+| `game_server.py`, `game/` | Browser edition server and client |
+| `engine/` | Bundled writing engine: provider routing, drafting pipeline, research, style |
+| `docs/` | Design notes, benchmark results and screenshots |
+
+## Development
 
 ```bash
 python -B -m unittest test_game_campaign test_game_library test_game_native test_lamplight_ai
+python run_lamplight.py --check      # headless Godot against the real service
+python check_game_browser.py         # browser edition; needs Playwright + Chromium
+python bench_lamplight.py --models MODEL_A MODEL_B --repeat 2   # live model comparison
 ```
 
-Saves, downloads and checkpoints go to `output/` (ignored by git).
+Game rules live on the Python side, and the Godot client never decides rewards,
+mastery or eligibility. The tests use temporary saves and mocked AI, so they never
+touch your saves or call paid providers. `bench_lamplight.py` is the only command
+that makes live AI calls, and it only runs when you start it.
 
-## Lamplight: an English library and letters through time
-
-```bash
-python game_server.py
-```
-
-Open `http://127.0.0.1:8765` and choose **English book library**. It includes **1,200
-complete English editions**, with at least 150 titles per shelf: science,
-philosophy, literature, history, politics and religion. Shelves can overlap.
-The catalog is built from [Project Gutenberg's official metadata](https://www.gutenberg.org/ebooks/offline_catalogs.html)
-and only accepts editions whose record declares them public domain in the USA. That
-declaration does not establish their rights in other countries.
-
-Search by title, author or subject, and take up to 12 books to the computer. The full
-text is downloaded when opened and kept in `output/lamplight/books/` for offline
-reading. The reader has in-book search, detected chapters, saved position, font,
-size and a night theme. Reader pagination does not match the printed edition.
-Catalog synopses may be generated by Gutenberg; the writing dossier receives the
-full downloaded text.
-
-The computer keeps the seven formats from `pipeline.py`, with automatic, guided or
-manual writing. Guided mode stops at the pipeline's decision points. The editor saves
-manuscripts locally, supports Markdown and exports `.md`. The five residents offer
-feedback using a shared model or one per character. Their prompts receive samples
-from the books and up to 60,000 characters of the manuscript; their replies never
-replace your text automatically.
-
-In **Settings** you can adjust providers, fallbacks, models and a local monthly call
-budget. Custom providers use a chat-completions-compatible API: set their URL, models
-and the name of an environment variable holding the key, add that variable to `.env`
-and restart the server. Keys are never sent to the browser. Metrics count local
-logical calls and estimate tokens; they do not reflect the balance or quota of an
-external subscription. Provider retries may add extra usage. One AI task runs at a time.
-
-WASD/arrows to walk, E to interact, or click to move. There are also shortcuts to
-every feature. Ambient sound is optional; the coffee maker has a minigame and Miso
-the cat has three hidden rewards. All browser pixel art is drawn locally with canvas,
-without downloading external visual assets.
-
-The English library is used outside the historical campaign; each collection keeps
-its own source cart. Archive editions are not given to a period's residents and do
-not count toward historical commissions. Your earlier campaign is preserved.
-
-```bash
-python game_catalog.py                    # rebuild the English catalog from the official RDF
-python -m unittest test_game_library test_game_campaign -v
-python check_game_browser.py              # optional visual check, requires Playwright
-```
-
-Integration checks use mocked responses and temporary saves; they do not consume
-the configured APIs. Generation checkpoints are kept in `output/lamplight/jobs/`.
-If the server restarts during a generation, its state is marked interrupted and the
-files remain available for recovery.
-
-### Historical campaign
-
-```bash
-python game_server.py --port 8765
-```
-
-Open `http://127.0.0.1:8765` and choose **Letters across time** (shortcut **6**).
-The campaign has English and Spanish controls. It starts in 1630 and advances in
-50-year jumps up to 1930. The computer and its connection to the models are the
-fantastical exception; sources and correspondents are restricted on the server.
-
-Study the library notes, bring sources to the desk and write a manuscript. Copyist
-shifts pay coins and paper without using an API. Each era demands longer texts, more
-sources and, from 1680 on, arguing with a received letter. The markers `[B1]`, `[B2]`,
-etc. identify notes; the mail shows its `[L…]` marker. You can insert them from the
-campaign and develop the argument in the editor. Delivering a commission pays coins
-and prestige. Meet the machine's requirements, collect pending mail and jump to the
-next era.
-
-Mail costs postage and paper. Replies take one to four in-game days, allow
-rejoinders, and you can only write to correspondents active in that era. They are
-**fictional debates with prepared replies**, not authentic letters. **Send with AI
-reply** additionally offers a reply to your specific argument using the model
-configured for residents. It only receives notes from that era and previously
-delivered letters; it keeps the postal delay and charges no postage if it fails. A
-filter rejects explicit future years and replies in the wrong language, but it cannot
-catch every anachronism. The fictional residents and the desk can also use the
-configured providers; their instructions and context are limited to the era, though
-that does not guarantee a model never commits an anachronism. The whole campaign
-can be played without keys or network.
-
-The first historical catalog contains **14 original bilingual study notes**, two
-new ones per era, not fourteen full books. Each links to the reference work or
-documentation. External pages are modern references outside the fiction; they are
-not downloaded or passed to the characters. For example, the entry for
-[Frankenstein (1818)](https://www.gutenberg.org/ebooks/41445) distinguishes that
-edition from 1831, and the one for [Relativity](https://www.gutenberg.org/ebooks/5001)
-identifies the 1920 translation. The earlier Gutenberg catalog and its downloads are
-kept on disk: its editions do not enter the campaign until individually dated.
-A US public-domain label does not mean historical availability or universal
-permission; [Gutenberg explains its territorial conditions](https://www.gutenberg.org/policy/permission.html).
-
-The economy, deadlines and places are fictional rules. Commission acceptance checks
-length, references, resources and duplicate payments: **it does not certify literary
-quality, historical accuracy or originality**. Nothing is published outside the game.
-Progress is saved atomically to `output/lamplight/campaign.json`, separate from
-earlier manuscripts and preferences. Tests use temporary directories and never
-modify your save.
-
-```bash
-python -m unittest test_game_campaign -v  # full campaign and HTTP limits, no external network
-python check_game_browser.py            # interface; requires Playwright and its Chromium
-```
-
-## Lamplight in Godot
-
-Game development continues in the native project `godot/project.godot`. From this
-folder, run `python run_lamplight.py --editor` to open Godot and press F5 to play.
-`python run_lamplight.py` launches the game directly. The launcher runs the local
-Python service and keeps saves separate per mode. If the engine is missing, use
-`python run_lamplight.py --setup`.
-
-Startup no longer spends calls checking HyperCharm before opening the window:
-`--hyper` and `LAMPLIGHT_AUTO_HYPER=1` only load the configuration. The test starts
-from **AI setup**, with activity and elapsed time visible. The computer and the desk
-offer five saved steps (question, evidence, outline, draft and revision) with AI
-feedback and player approval between steps. **AI usage** shows requests, errors,
-timings and tokens; it separates provider-reported data from estimates and does not
-represent your balance.
-
-The first native build has movement, collisions, dialogue, reading, writing and
-separate saves. Earlier browser saves are preserved; their migration is still
-pending. See [native progress](docs/M1_NATIVE.md) for what is implemented, the
-checks and next steps.
+Design notes: [cozy learning build](docs/COZY_LEARNING.md) ·
+[native foundation](docs/M1_NATIVE.md) · [campaign editions](docs/CAMPAIGN_EDITIONS.md) ·
+[AI benchmark](docs/AI_BENCHMARK.md) · [production plan](PLAN.md).
 
 ## License
 
-Code, text and generated art are released into the public domain under
-[CC0 1.0](LICENSE). Third-party assets keep their own licenses: Pixelify Sans is
-under the SIL Open Font License and *Mystical Piano* by Indieteur is CC0; see
+Code, text and generated art are dedicated to the public domain under
+[CC0 1.0](LICENSE). Third-party assets keep their own licenses: the Pixelify Sans font
+is under the SIL Open Font License, and *Mystical Piano* by Indieteur is CC0. See
 [`godot/assets/CREDITS.md`](godot/assets/CREDITS.md).

@@ -1,0 +1,12 @@
+# Core: local service, writing engine and AI providers
+requests
+python-dotenv
+openai>=1.40
+beautifulsoup4
+lxml
+# Optional: extra document formats the writing engine can read
+pypdf
+EbookLib
+python-docx
+# Optional: browser build visual check (then run: playwright install chromium)
+# playwright

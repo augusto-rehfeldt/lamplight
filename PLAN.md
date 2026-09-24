@@ -60,8 +60,8 @@ route content. This continuation does not claim the full release backlog done.
   selection, discussion flow and missing-art behavior, plus desktop captures.
   All 33 Python tests and the native integration check passed; rendered portrait
   screens were reviewed at 1280×720 and 1920×1080 with temporary saves and mocked
-  AI. Review sheets: `output/lamplight-engine-check/portraits-residents-1920.png`
-  and `output/lamplight-engine-check/portraits-thinkers-1920.png`.
+  AI. Captures only show thinkers eligible for the captured era; no cross-era
+  portrait sheets.
 
 Next art work: matching individual world sprites for historical visitors,
 directional walking and additional expressions. The existing generic garden
@@ -443,7 +443,7 @@ Introduce ordinary game systems only when their milestone needs them. Use Godot'
 | `game_campaign.py` | Validated progression, choices, resource/relationship outcomes, route commitments, historical/fictional provenance, ending eligibility and rewards |
 | `game_server.py` | Retained browser server, download/cache and security helpers; reuse backend capabilities without exposing unscoped legacy routes on the native listener |
 | `research.py`, `game_catalog.py` | Reuse extraction/search/citation helpers through explicit per-mode policies; curate campaign edition/rights metadata; keep personal/current sources outside campaign resolution |
-| `llm.py`, `pipeline.py` | Reuse routing/writing; integrate credentials and pinned per-job mode/source policy without changing unrelated article-writer defaults |
+| `llm.py`, `pipeline.py` | Reuse routing/writing; integrate credentials and pinned per-job mode/source policy without changing the engine's unrelated defaults |
 | Python tests, native engine checks and legacy browser check | Verify server rules, Godot scenes/input/UI and retained behavior; use temporary saves and mocked providers |
 
 Godot loads bundled resources through `res://`; game assets do not require widening the old browser server's static routes. Add missing-resource behavior and loading feedback inside the engine. The native localhost listener exposes only authenticated game operations, never the project/save/credential directories. Preserve host/origin/token protections and pin each operation to its owning slot. Export/package the Python companion deliberately; mobile/web exports need their own service and storage design before release.

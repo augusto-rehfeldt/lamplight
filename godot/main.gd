@@ -1814,20 +1814,7 @@ func capture_screens() -> void:
 	await capture("thinker-1280")
 	await discuss_figure(slot.campaign.figures[0],"challenge")
 	await capture("debate-1280")
-	# Render every bundled portrait together without changing campaign eligibility.
 	get_window().size = Vector2i(1920,1080)
-	var portrait_groups := {"residents":["margot","ada","elias","jules","noor","miso"],"thinkers":["galileo","boyle","swift","franklin","shelley","darwin","curie"]}
-	for group in portrait_groups:
-		panel("Portrait review · " + group)
-		var gallery := GridContainer.new()
-		gallery.columns = 4
-		content.add_child(gallery)
-		for id in portrait_groups[group]:
-			var card := VBoxContainer.new()
-			gallery.add_child(card)
-			portrait_row(id,id.capitalize(),card)
-			label_text(id.capitalize(),card,13)
-		await capture("portraits-" + group + "-1920")
 	await return_to_title()
 	await create_slot("modern")
 	await capture("modern-1920")
