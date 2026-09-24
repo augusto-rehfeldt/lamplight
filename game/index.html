@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="library-token" content="__TOKEN__">
+  <meta name="theme-color" content="#24252c">
+  <title>Lamplight · Letters across time</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Lamplight home"><span class="brand-icon">▥</span><span>LAMPLIGHT<small>A WRITER’S LITTLE WORLD</small></span></a>
+    <div class="side-label">YOUR CORNER OF THE WORLD</div>
+    <nav aria-label="Main navigation">
+      <button class="nav active" data-view="world"><span>⌂</span>The library<kbd>1</kbd></button>
+      <button class="nav" data-view="campaign" aria-label="Time machine and post desk"><span>⌛</span>Letters across time<kbd>6</kbd></button>
+      <button class="nav" data-view="catalog"><span>▤</span>Browse books<kbd>2</kbd></button>
+      <button class="nav" data-view="archive"><span>▥</span>English book library</button>
+      <button class="nav" data-view="computer"><span>▣</span>The computer<kbd>3</kbd></button>
+      <button class="nav" data-view="writer"><span>✎</span>My manuscripts<kbd>4</kbd></button>
+      <button class="nav" data-view="residents"><span>♧</span>The regulars<kbd>5</kbd></button>
+    </nav>
+    <div class="side-divider"></div>
+    <div class="side-label">ON YOUR BOOK TROLLEY <span id="bag-count">0</span></div>
+    <div id="side-bag" class="side-bag"><p>A good idea starts<br>with a little browsing.</p></div>
+    <button class="text-button trolley-link" data-view="catalog">+ Find your next book</button>
+    <div class="side-bottom">
+      <div class="tiny-quote">“A room without books is like<br>a body without a soul.”<small>— CICERO</small></div>
+      <button class="nav" data-view="settings"><span>⚙</span>Settings</button>
+      <div class="local-label"><i></i> Your world, saved locally</div>
+    </div>
+  </aside>
+  <main>
+    <header class="topbar"><div><span class="breadcrumb">Your little world</span><span class="slash">/</span><strong>The library</strong></div><div class="top-actions"><button id="sound" class="pill" aria-pressed="false">♫ <span>Sound off</span></button><span class="time-pill">☾ <span id="clock">Evening</span></span><button class="avatar" data-view="settings" aria-label="Open settings">A</button></div></header>
+    <section class="home">
+      <div class="page-heading"><div><div class="eyebrow">YOUR LAPTOP SURVIVED. YOUR CENTURY DID NOT.</div><h1>Write your way through time.</h1><p>From a borrowed desk in 1630 to an institute in 1930.</p></div><button class="primary" data-view="campaign">Open the time machine <span>↗</span></button></div>
+      <div id="campaign-status" class="notice" role="status"></div>
+      <div class="world-card">
+        <div class="world-top"><span><i class="live-dot"></i> THE LAMPLIGHT LIBRARY</span><span class="world-weather">☂ A little rain. A lot of possibility.</span></div>
+        <div class="canvas-wrap"><canvas id="world" width="960" height="560" tabindex="0" aria-label="Walkable pixel art library. Use WASD or arrow keys to walk and E to interact. All locations are also available through the navigation buttons."></canvas><div class="room-tag"><span>✦</span> The reading room<small>A quiet place to make a little noise.</small></div><div id="interaction" class="interaction" hidden></div><div class="world-compass">N<br>✧</div></div>
+        <div class="world-bottom"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>to wander</span><kbd>E</kbd><span>to interact</span><span class="controls-extra">or click where you’d like to go</span></div><button class="text-button" data-action="help">A little help <span>?</span></button></div>
+      </div>
+      <div class="below-world">
+        <section class="regulars-card"><div class="section-top"><h2>A few familiar faces</h2><button class="text-button" data-view="residents">Meet everyone ↗</button></div><div class="resident-row" id="resident-row"></div></section>
+        <section class="journal-card"><span class="eyebrow">YOUR LITTLE JOURNEY</span><div class="journey-metrics"><div><strong id="book-total">…</strong><small>books to discover</small></div><div><strong id="draft-total">0</strong><small>stories in progress</small></div><div><strong id="coffee-total">0</strong><small>cups of possibility</small></div></div></section>
+      </div>
+      <footer class="home-footer"><span>Made for curious minds and unhurried evenings.</span><span id="connection">Opening the library…</span></footer>
+    </section>
+  </main>
+  <dialog id="panel" aria-labelledby="panel-title"><div class="panel-header"><div><span class="eyebrow" id="panel-kicker">THE LAMPLIGHT LIBRARY</span><h2 id="panel-title">The library</h2></div><button class="icon-button" id="close-panel" aria-label="Close panel">×</button></div><div id="panel-body"></div></dialog>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
