@@ -121,10 +121,10 @@ def main():
         http = ThreadingHTTPServer(("127.0.0.1", 0), game_native.Handler)
         http.library = game_native.Library(directory)
         if args.check or args.capture:
-            # Test-only provider double: the real gate/benchmark still run through HTTP.
+            # Test-only provider double: the real gate/benchmark still run through the native API.
             from unittest.mock import patch
             from test_lamplight_ai import provider_reply
-            stack.enter_context(patch.object(game_server.requests, "post", side_effect=provider_reply))
+            stack.enter_context(patch.object(game_native, "chat_request", side_effect=provider_reply))
         elif args.hyper:
             try:
                 setup_hyper(http.library)

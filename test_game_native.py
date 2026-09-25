@@ -6,14 +6,16 @@ import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import game_native as native
 from run_lamplight import single_library
 from test_game_campaign import manuscript
-from test_lamplight_ai import qualify, provider_reply
+from test_lamplight_ai import failing_service, qualify, provider_reply
+
+REAL_CHAT_REQUEST = native.chat_request
 
 
 class NativeTests(unittest.TestCase):
@@ -34,7 +36,7 @@ class NativeTests(unittest.TestCase):
         self.root = pathlib.Path(self.temp.name)
         self.library = native.Library(self.root)
         qualify(self.library)
-        provider = patch.object(native.legacy.requests, "post", side_effect=provider_reply)
+        provider = patch.object(native, "chat_request", side_effect=provider_reply)
         provider.start()
         self.addCleanup(provider.stop)
 
@@ -59,7 +61,7 @@ class NativeTests(unittest.TestCase):
             if index != 4:
                 self.assertFalse(result["slot"]["writing"]["steps"][index]["review"]["ready"])
             saved = act(op="writing_save", text="An observation supports a limited inference. [B1]", **request)
-            with patch.object(native.legacy.requests, "post", side_effect=native.legacy.requests.Timeout), self.assertRaises(ValueError):
+            with patch.object(native, "chat_request", side_effect=native.AIConnectionError), self.assertRaises(ValueError):
                 act(op="ai_coach", **request)
             self.assertEqual(act(op="load")["writing"], saved["writing"])
             result = act(op="ai_coach", **request)
@@ -114,15 +116,11 @@ class NativeTests(unittest.TestCase):
 
     def test_usage_counts_real_requests_errors_and_persists_without_prompt_or_key(self):
         before = self.library.request(dict(op="ai_status"))["usage"]
-        def metered(*args, **kwargs):
-            response = provider_reply(*args, **kwargs)
-            response.iter_content.return_value = [json.dumps({"choices":[{"message":{"content":"A reply"}}],
-                "usage":{"prompt_tokens":123,"completion_tokens":45}}).encode()]
-            return response
+        metered = ("A reply", {"prompt_tokens": 123, "completion_tokens": 45})
         config = {"url":"http://localhost:11434/v1", "model":"test-chat"}
-        with patch.object(native.legacy.requests, "post", side_effect=metered):
+        with patch.object(native, "chat_request", return_value=metered):
             self.library.send_ai(config, "SECRET-KEY", "PRIVATE-PROMPT", "PRIVATE-TEXT")
-        with patch.object(native.legacy.requests, "post", side_effect=native.legacy.requests.Timeout), self.assertRaises(native.legacy.requests.Timeout):
+        with patch.object(native, "chat_request", side_effect=native.AIConnectionError), self.assertRaises(native.AIConnectionError):
             self.library.send_ai(config, "SECRET-KEY", "PRIVATE-PROMPT", "PRIVATE-TEXT")
         self.library.send_ai(config, "SECRET-KEY", "PRIVATE-PROMPT", "PRIVATE-TEXT")
         usage = native.Library(self.root).request(dict(op="ai_status"))["usage"]
@@ -327,34 +325,34 @@ class NativeTests(unittest.TestCase):
         qualify(self.library)
         self.library.request(dict(op="campaign",slot=slot["id"],action="study",book=-1))
         self.library.request(dict(op="document",slot=slot["id"],title="Private",text="NEVER SEND AUTOMATICALLY"))
-        with patch.object(native.legacy.requests,"post") as post:
-            response = post.return_value.__enter__.return_value
-            response.status_code = 200
-            response.iter_content.return_value = [json.dumps({"choices":[{"message":{"content":"A test reply"}}]}).encode()]
+        with patch.object(native,"chat_request",return_value=("A test reply", None)) as post:
             reply = self.library.request(dict(op="ai_ask",slot=slot["id"],resident="ada",text="How can I check this observation?"))
             self.assertEqual(reply["text"],"A test reply")
             sent = post.call_args.kwargs
-            self.assertFalse(sent["allow_redirects"])
-            self.assertEqual(sent["headers"]["Authorization"],"Bearer test-secret")
-            context = json.dumps(sent["json"])
+            self.assertEqual(sent["key"],"test-secret")
+            self.assertEqual(set(sent),{"url","key","model","system","prompt","max_tokens","timeout"})  # no tools
+            context = json.dumps([sent["system"], sent["prompt"]])
             self.assertIn("year is 1630",context)
             self.assertIn("Only the protagonist",context)
             self.assertIn("Jupiter",context)
             self.assertNotIn("NEVER SEND AUTOMATICALLY",context)
-            self.assertNotIn("tools",sent["json"])
             for figure in ("newton", "unknown"):
                 with self.assertRaisesRegex(ValueError,"living thinker"):
                     self.library.request(dict(op="ai_ask",slot=slot["id"],figure=figure,text="Explain your evidence."))
             self.assertEqual(post.call_count,1)
             self.library.request(dict(op="ai_ask",slot=slot["id"],figure="galileo",text="Explain your evidence."))
-            context = post.call_args.kwargs["json"]["messages"][0]["content"]
+            context = post.call_args.kwargs["system"]
             self.assertIn("Galileo Galilei",context)
             self.assertIn("fictional dialogue",context)
             self.assertNotIn("test-secret",context)
-            response.status_code = 401
+        with patch.object(native,"chat_request",REAL_CHAT_REQUEST), \
+                patch.object(native.legacy.llm,"shared_service",return_value=failing_service(401)):
             with self.assertRaisesRegex(ValueError,"rejected the key"):
                 self.library.request(dict(op="ai_test"))
-            post.side_effect = native.legacy.requests.Timeout("test-secret must not leak")
+        timeout = MagicMock()
+        timeout.generate_content.side_effect = TimeoutError("test-secret must not leak")
+        with patch.object(native,"chat_request",REAL_CHAT_REQUEST), \
+                patch.object(native.legacy.llm,"shared_service",return_value=timeout):
             with self.assertRaisesRegex(ValueError,"connection failed") as caught:
                 self.library.request(dict(op="ai_test"))
             self.assertNotIn("test-secret",str(caught.exception))
@@ -363,7 +361,7 @@ class NativeTests(unittest.TestCase):
                 self.library.request(config | {"url":url})
         self.library.request(config | {"url":"https://example.com/v1","key":"","enabled":False})
         self.assertEqual(self.library.ai_key,"")
-        with patch.object(native.legacy.requests,"post",side_effect=AssertionError("No automatic network")):
+        with patch.object(native,"chat_request",side_effect=AssertionError("No automatic network")):
             self.library.request(dict(op="list"))
             self.library.request(dict(op="ai_status"))
             with self.assertRaises(ValueError):
@@ -425,7 +423,7 @@ class NativeTests(unittest.TestCase):
         self.library.request(dict(op="ai_config",url="http://localhost:11434/v1",model="mock",key="",enabled=True))
         qualify(self.library)
         request = dict(op="ai_generate",slot=slot["id"],kind="article",text="Compare observation and interpretation",books=[-1])
-        with patch.object(native.legacy.requests,"post") as post:
+        with patch.object(native,"chat_request",return_value=("A sourced draft [B1]", None)) as post:
             with self.assertRaises(ValueError):
                 self.library.request(request)
             post.assert_not_called()
@@ -434,17 +432,14 @@ class NativeTests(unittest.TestCase):
             for books in ([-14],[1342],[],[True]):
                 with self.assertRaises(ValueError):
                     self.library.request(request | {"books":books})
-            response = post.return_value.__enter__.return_value
-            response.status_code = 200
-            response.iter_content.return_value = [json.dumps({"choices":[{"message":{"content":"A sourced draft [B1]"}}]}).encode()]
             result = self.library.request(request)
             self.assertIn("[B1]",result["text"])
-            payload = post.call_args.kwargs["json"]
-            self.assertEqual(payload["max_tokens"],2200)
-            self.assertIn("450–550",payload["messages"][0]["content"])
-            self.assertIn("Jupiter",payload["messages"][0]["content"])
-            self.assertNotIn("Radioactivity",payload["messages"][0]["content"])
-            self.assertNotIn(native.campaign.BOOKS[-2]["notes"]["en"],payload["messages"][0]["content"])
+            sent = post.call_args.kwargs
+            self.assertEqual(sent["max_tokens"],2200)
+            self.assertIn("450–550",sent["system"])
+            self.assertIn("Jupiter",sent["system"])
+            self.assertNotIn("Radioactivity",sent["system"])
+            self.assertNotIn(native.campaign.BOOKS[-2]["notes"]["en"],sent["system"])
             self.assertEqual(self.library.state["slots"][slot["id"]]["documents"],[])
             self.library.request(dict(op="travel",slot=slot["id"],destination="town"))
             with self.assertRaisesRegex(ValueError,"computer"):

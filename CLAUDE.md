@@ -7,10 +7,15 @@ build (`game/`, served by `game_server.py`) and a local Python service
 
 ## Non-negotiables
 
-- Standalone. The writing engine (`llm`, `pipeline`, `research`, `style`, `humanize`,
-  `ui`) is bundled in `engine/`; `game_server.py` puts it on `sys.path` (flat imports)
-  and redirects its output/library folders under `output/lamplight/`. Provider keys
-  come from this folder's `.env` (see `.env.example`).
+- The writing engine (`llm`, `pipeline`, `research`, `style`, `humanize`, `ui`) is
+  bundled in `engine/`; `game_server.py` puts it on `sys.path` (flat imports) and
+  redirects its output/library folders under `output/lamplight/`. Provider keys come
+  from this folder's `.env` (see `.env.example`).
+- One AI suite: every completion runs on book writer's AIService (sibling `book writer`
+  folder, or `LAMPLIGHT_BOOK_WRITER`). `engine/llm.py` keeps the chain, roles, catalogues,
+  key discovery and recovery, and sends each link through `shared_service()`/`_send()`
+  (streamed, fail-fast). The in-game AI goes through `game_native.chat_request()`. Tests
+  patch those seams; no SDK client or raw completion request lives here.
 - Never show a thinker outside their era, in gameplay, captures, docs or screenshots:
   a figure appears only when `campaign.figures()` returns it (`active <= year < died`).
   No cross-era portrait galleries.
@@ -25,7 +30,7 @@ build (`game/`, served by `game_server.py`) and a local Python service
 ## Checks
 
 ```powershell
-rtk python -B -m unittest test_game_campaign test_game_library test_game_native test_lamplight_ai
+rtk python -B -m unittest test_game_campaign test_game_library test_game_native test_lamplight_ai test_engine_llm
 rtk python run_lamplight.py --check     # headless Godot against the real service
 rtk python run_lamplight.py --capture   # screenshots in output/lamplight-engine-check/
 ```

@@ -1,4 +1,4 @@
-"""Thin wrapper over the hyper.charm.land OpenAI-compatible endpoint.
+"""Provider chain and roles for the writing engine, on book writer's shared AI suite.
 
 Two roles are used across the pipeline:
   PRO   - topic selection, outline audit, review, final approval (better judgement)
@@ -29,12 +29,9 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from typing import Any
-
-from openai import OpenAI
 
 import ui
 
@@ -49,9 +46,8 @@ if sys.platform == "win32":
 
 BASE_URL = os.environ.get("AW_BASE_URL", "https://hyper.charm.land/v1")
 
-# Fallback path: `opencode run -m opencode-go/<model>`. Version suffixes are a
-# hyper-ism (deepseek-v4-pro-0813); opencode-go carries the unsuffixed name.
-# The CLI route is pinned to go; zen is already a first-class provider on its own.
+# The `go` link is opencode-go. Version suffixes are a hyper-ism
+# (deepseek-v4-pro-0813); opencode-go carries the unsuffixed name.
 OPENCODE_PROVIDER = "opencode-go"
 
 # Claude Code takes the short aliases; anything else is passed through, so a full
@@ -63,20 +59,6 @@ OPENCODE_ALIAS = {
     "deepseek-v4-pro-0813": "deepseek-v4-pro",
     "deepseek-v4-flash-0731": "deepseek-v4-flash",
 }
-
-# `opencode run` defaults to the `build` agent: the whole coding toolbox, plus
-# CLAUDE.md and every plugin skill in the system prompt. Measured 2026-08-22, on a
-# section-sized prompt deepseek answered with six rounds of tool calls and not one
-# word of prose. `redactor` is defined in opencode.json with no tools and a
-# one-line system prompt, which is what a drafting call actually needs.
-OPENCODE_AGENT = os.environ.get("AW_OPENCODE_AGENT", "redactor")
-
-# opencode-go/deepseek-v4-pro streams for ~40s and then returns nothing at all
-# above ~47k characters of prompt: no text, no error event, zero tokens billed,
-# exit code 0. Its flash sibling answers the very same prompt, so an empty pro run
-# retries there instead of killing the last link of the chain. Measured 2026-08-22
-# on the 52k-character section prompt; 46k still works on pro.
-OPENCODE_SIBLING = {"deepseek-v4-pro": "deepseek-v4-flash"}
 
 ROOT = pathlib.Path(__file__).resolve().parent
 
@@ -116,30 +98,6 @@ def _oauth_proxy_running() -> bool:
             return True
     except OSError:
         return False
-
-
-def ensure_oauth_proxy() -> None:
-    """Start the openai-oauth proxy if it is not already listening."""
-    if _oauth_proxy_running():
-        return
-    # On Windows npx is a .cmd: Popen(["npx", …]) raises [WinError 2] even though
-    # the shell finds it, so hand Popen the path shutil.which resolved.
-    exe = shutil.which("npx")
-    if not exe:
-        raise FileNotFoundError(
-            "npx no está en el PATH; instalá Node.js para usar el proveedor oauth")
-    ui.log("[llm] arrancando proxy openai-oauth…")
-    subprocess.Popen(
-        [exe, "openai-oauth@latest", "--detach"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    )
-    for _ in range(40):
-        if _oauth_proxy_running():
-            return
-        time.sleep(0.25)
-    raise RuntimeError("el proxy openai-oauth no arrancó en 10s; "
-                       "verificá que npx y node estén instalados")
 
 
 def oauth_cost_label(model: str) -> str:
@@ -296,7 +254,6 @@ def configure(chain: list[str] | None = None, pro: str = "", flash: str = "",
     PRO = pro or PROVIDERS[CHAIN[0]]["pro"]
     FLASH = flash or PROVIDERS[CHAIN[0]]["flash"]
     JUDGES = _judges()
-    _clients.clear()               # base_url/key may differ for the new head
 
 
 def _serves(backend: str, model: str) -> bool:
@@ -390,9 +347,6 @@ def catalogue(backend: str) -> list[str]:
     return _catalogue_cache[backend]
 
 
-_clients: dict[str, OpenAI] = {}
-
-
 def _opencode_auth_key() -> str:
     """The key opencode's CLI already stores at login — the same one zen needs.
     Crush and every opencode tool read it here, so the script may too instead of
@@ -428,102 +382,6 @@ def _key_for(spec: dict) -> str:
             or os.environ.get("OPENAI_API_KEY"))
 
 
-def client(backend: str = "hyper") -> OpenAI:
-    c = _clients.get(backend)
-    if c is None:
-        spec = PROVIDERS[backend]
-        if spec.get("base_url") == _OAUTH_BASE_URL:
-            ensure_oauth_proxy()
-        key = _key_for(spec)
-        if not key:
-            # RuntimeError, not SystemExit: this provider may be one link in a
-            # chain, and a missing key here has to let the next one try.
-            raise RuntimeError(f"falta la clave para {backend}: poné "
-                               f"{spec.get('key_env', 'AW_API_KEY')}=sk-... in lamplight/.env")
-        # 300s is generous for a section-sized completion; past that the upstream
-        # has stalled and retrying beats waiting. Raise with AW_TIMEOUT for books.
-        timeout = float(os.environ.get("AW_TIMEOUT", "300"))
-        c = OpenAI(api_key=key, base_url=spec.get("base_url", BASE_URL),
-                   timeout=timeout, max_retries=0)
-        _clients[backend] = c
-    return c
-
-
-def _opencode_once(exe: str, target: str, body: str,
-                   timeout: int) -> tuple[str, list[str]]:
-    """One `opencode run`, returning (text, diagnostics).
-
-    The CLI reports an upstream refusal as an ``error`` event on stdout and still
-    exits 0, so the diagnostics are collected here instead of being thrown away —
-    a silent empty transcript is the one failure mode that used to reach the caller.
-    """
-    # The prompt goes through stdin, never argv: Windows caps a command line at
-    # 32k characters and a dossier-sized prompt blows past it ("The command line
-    # is too long"). `opencode run` with no positional message reads stdin.
-    # No --pure: it disables the plugins that register the opencode-go provider,
-    # and the run then returns an empty transcript.
-    # The coding project's CLAUDE.md forces Spanish and injects coding instructions
-    # into article completions. Keep providers/agent settings in an isolated directory.
-    config = json.loads((ROOT / "opencode.json").read_text(encoding="utf-8"))
-    config.pop("instructions", None)
-    with tempfile.TemporaryDirectory(prefix="lamplight-") as workdir:
-        (pathlib.Path(workdir) / "opencode.json").write_text(json.dumps(config), encoding="utf-8")
-        proc = subprocess.run(
-            [exe, "run", "-m", target, "--agent", OPENCODE_AGENT, "--format", "json"],
-            input=body, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=timeout, cwd=workdir)
-    chunks, notes = [], []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        kind, part = event.get("type"), event.get("part", {})
-        if kind == "text":
-            chunks.append(part.get("text", ""))
-        elif kind == "error":
-            err = event.get("error", {})
-            notes.append(f"{err.get('name', 'error')}: "
-                         f"{err.get('data', {}).get('message', '')[:200]}")
-        elif kind == "step_finish" and part.get("reason") not in (None, "stop"):
-            notes.append(f"corte por «{part.get('reason')}» "
-                         f"(tokens {part.get('tokens', {}).get('input', 0)})")
-    return "".join(chunks).strip(), notes
-
-
-def opencode_chat(model: str, prompt: str, system: str | None = None,
-                  timeout: int | None = None) -> str:
-    """Backup path through the opencode CLI. Used only when hyper is down.
-
-    Nothing streams here — one fresh process per completion — so a slow reasoning
-    model spends the whole wait silent. `AW_OPENCODE_TIMEOUT` raises the 900s
-    allowance for exactly that case.
-    """
-    if timeout is None:
-        timeout = int(os.environ.get("AW_OPENCODE_TIMEOUT", "900"))
-    exe = shutil.which("opencode")
-    if not exe:
-        raise RuntimeError("opencode no está instalado; no hay ruta de respaldo")
-    name = OPENCODE_ALIAS.get(model, model)
-    body = f"{system}\n\n{prompt}" if system else prompt
-    tried: list[str] = []
-    for candidate in (name, OPENCODE_SIBLING.get(name)):
-        if not candidate:
-            break
-        target = f"{OPENCODE_PROVIDER}/{candidate}"
-        out, notes = _opencode_once(exe, target, body, timeout)
-        if out:
-            if tried:
-                print(f"[llm] opencode: {tried[0].split(':')[0]} volvió vacío; "
-                      f"respondió {target}")
-            return out
-        tried.append(f"{target}: {'; '.join(notes) or 'transcripción vacía'}")
-    raise RuntimeError("opencode no devolvió texto — " + " | ".join(tried))
-
-
 # Claude Code prints a quota notice on **stdout and exits 0**, so it arrives
 # looking exactly like a completion: «You've hit your session limit · resets
 # 9:10am». It got drafted into the article and parsed as JSON. The length guard
@@ -538,128 +396,78 @@ def _quota_notice(out: str) -> bool:
     return len(out) < 400 and bool(_QUOTA.search(out))
 
 
-def claude_chat(model: str, prompt: str, system: str | None = None,
-                timeout: int = 1800) -> str:
-    """Claude Code CLI in print mode. Runs on the user's Claude subscription.
+# Every completion runs on book writer's AIService -- the AI suite the whole
+# workspace shares (music writer, mathforge, book-watch, the games...). This
+# module keeps what is Lamplight's own: the provider chain, PRO/FLASH roles and
+# their per-provider translation, catalogues, key discovery, heartbeat, the
+# interactive recovery and JSON repair. LAMPLIGHT_BOOK_WRITER overrides the path.
+BOOK_WRITER = pathlib.Path(os.environ.get("LAMPLIGHT_BOOK_WRITER")
+                           or ROOT.parent.parent / "book writer")
 
-    `claude -p` with no positional message reads the prompt from stdin, which is
-    the only way a dossier-sized prompt gets through on Windows (32k argv cap).
-    """
-    exe = shutil.which("claude")
-    if not exe:
-        raise RuntimeError("claude no está instalado; instalá Claude Code o usá AW_BACKEND=hyper")
-    args = [exe, "-p", "--output-format", "text", "--safe-mode", "--tools", "",
-            "--system-prompt", system or "Write only the requested text in the requested language.",
-            "--model", CLAUDE_ALIAS.get(model, model)]
-    proc = subprocess.run(args, input=prompt, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
-    out = (proc.stdout or "").strip()
+# Lamplight's backend names -> book writer's providers. Custom endpoints from the
+# game's settings ride the generic OpenAI-compatible client ("openrouter").
+SHARED = {"claude": "claude", "hyper": "hyper", "zen": "opencode-zen",
+          "grok": "grok", "go": "opencode-go", "oauth": "openai-oauth"}
+
+_services: dict[tuple, Any] = {}
+_services_lock = threading.Lock()
+
+
+def shared_service(provider: str, overrides: dict[str, Any]) -> Any:
+    """book writer's AIService for `provider`, with Lamplight's key/endpoint layered
+    on top. One instance per distinct setting, shared by every thread."""
+    cache_key = (provider, tuple(sorted(overrides.items())))
+    with _services_lock:
+        if cache_key not in _services:
+            if str(BOOK_WRITER) not in sys.path:
+                sys.path.insert(0, str(BOOK_WRITER))
+            from ai_book_creator.cli import provider_config_path
+            from ai_book_creator.services.ai_service import AIService
+            _services[cache_key] = AIService(
+                config_path=provider_config_path(provider),
+                usage_state_path=str(ROOT.parent / "output" / "shared_ai_usage.json"),
+                allow_auth_prompt=False, client_max_retries=0,
+                config_overrides=dict(overrides))
+        return _services[cache_key]
+
+
+def _send(backend: str, model: str, prompt: str, system: str | None, *,
+          temperature: float | None, max_tokens: int | None, retries: int) -> str:
+    """One link of the chain: `model` (already in this provider's spelling) on `backend`."""
+    spec = PROVIDERS[backend]
+    provider = SHARED.get(backend, "openrouter")
+    if provider == "claude":
+        # The Claude Code CLI on the user's subscription: no key, no endpoint.
+        overrides: dict[str, Any] = {"timeout": 1800}
+    else:
+        # Streamed, so the timeout is per chunk: a slow reasoning model outlives a
+        # gateway's idle timeout on a plain request (zen answered 503 at 207s on a
+        # completion the stream finished in 341s, measured 2026-08-23).
+        overrides = {"timeout": int(float(os.environ.get("AW_TIMEOUT", "300"))), "stream": True,
+                     # The engine's caps are ceilings, sent as max_tokens like before.
+                     "token_param": "max_tokens", "cap_is_ceiling": True}
+        if spec.get("base_url") and backend != "go":
+            overrides["base_url"] = spec["base_url"]
+        if backend not in SHARED:
+            overrides["headers"] = {}  # a custom endpoint gets no book-writer attribution headers
+        if backend not in ("go", "oauth"):
+            # go reads opencode's own login and oauth the local proxy, inside book writer.
+            key = _key_for(spec)
+            if not key:
+                # RuntimeError, not SystemExit: this provider may be one link in a
+                # chain, and a missing key here has to let the next one try.
+                raise RuntimeError(f"falta la clave para {backend}: poné "
+                                   f"{spec.get('key_env', 'AW_API_KEY')}=sk-... in lamplight/.env")
+            overrides["api_key"] = key
+    out = shared_service(provider, overrides).generate_content(
+        prompt, model=model, system=system, temperature=temperature,
+        max_completion_tokens=max_tokens, max_retries=retries, wait_for_limits=False)
+    out = (out or "").strip()
     if not out:
-        raise RuntimeError(f"claude {model} no devolvió texto: "
-                           f"{(proc.stderr or '')[:300]}")
+        raise RuntimeError(f"{backend}/{model} no devolvió texto")
     if _quota_notice(out):
-        raise RuntimeError(f"claude {model} sin cuota: {out}")
+        raise RuntimeError(f"{backend}/{model} sin cuota: {out}")
     return out
-
-
-# A 4xx that will never fix itself: wrong key, wrong model name, malformed body.
-# Retrying one of these burns the full request timeout four times and still 404s.
-_FATAL_STATUS = {400, 401, 402, 403, 404}
-
-
-def _status(e: Exception) -> int:
-    """HTTP status behind an openai exception, 0 if it is not an HTTP error."""
-    code = getattr(e, "status_code", None)
-    if code is None:
-        code = getattr(getattr(e, "response", None), "status_code", None)
-    return int(code) if isinstance(code, int) else 0
-
-
-def _backoff(attempt: int, status: int) -> int:
-    """Seconds to wait before the next attempt.
-
-    429 and 5xx mean the upstream has no capacity right now, which on a free
-    model resolves in minutes, not in the 2-8s the plain exponential ramp waited:
-    a 503 used to eat the four attempts in one breath and kill the run.
-    """
-    if status == 429 or status >= 500:
-        return min(120, 15 * 2 ** attempt)
-    return 2 ** attempt * 2
-
-
-def _read_stream(r: Any) -> tuple[str, int, str]:
-    """Drain a streamed completion into (text, reasoning words, finish reason).
-
-    Reasoning tokens are counted, never returned: they are the model's scratchpad
-    and putting them in the article would be inventing prose nobody wrote. They
-    are worth counting because a reasoning model that answers with nothing but
-    scratchpad is a different failure from a provider that answers with nothing.
-    """
-    parts: list[str] = []
-    scratch: list[str] = []
-    finish = ""
-    for chunk in r:
-        if not chunk.choices:
-            continue
-        choice = chunk.choices[0]
-        parts.append(getattr(choice.delta, "content", None) or "")
-        scratch.append(getattr(choice.delta, "reasoning_content", None) or "")
-        finish = choice.finish_reason or finish
-    return "".join(parts).strip(), len("".join(scratch).split()), finish
-
-
-def hyper_chat(model: str, prompt: str, system: str | None = None, *,
-               temperature: float = 0.8, max_tokens: int | None = None,
-               retries: int = 4, backend: str = "hyper") -> str:
-    """Any OpenAI-compatible endpoint (hyper, zen), with backoff between attempts.
-
-    The call is **streamed**, and that is not cosmetic. A non-streamed request
-    holds one open socket with nothing on it until the whole completion is
-    written, so a slow reasoning model outlives both the client timeout
-    (``AW_TIMEOUT``, 300s) and zen's own gateway: measured 2026-08-23 on
-    ``zen/x-preview-f-free`` with the 7k-character topic prompt, the plain call
-    died at 207s with HTTP 503 while the streamed one ran 341s to completion —
-    first token at 2s, never more than 2.1s between chunks. Streaming turns the
-    timeout into a per-chunk one, which is the thing actually worth measuring.
-    """
-    messages: list[dict[str, str]] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    kwargs: dict[str, Any] = {"model": model, "messages": messages,
-                              "temperature": temperature, "stream": True}
-    if max_tokens:
-        kwargs["max_tokens"] = max_tokens
-    last: Exception | None = None
-    for attempt in range(retries):
-        status = 0
-        try:
-            out, reasoning, finish = _read_stream(
-                client(backend).chat.completions.create(**kwargs))
-            if out and finish != "length":
-                return out
-            last = RuntimeError(f"respuesta vacía o truncada (fin={finish or '?'}, "
-                                f"{reasoning:,} palabras de razonamiento)")
-            if finish == "length" and kwargs.get("max_tokens"):
-                kwargs["max_tokens"] *= 2
-        except Exception as e:  # noqa: BLE001 - transient upstream errors are the norm
-            last, status = e, _status(e)
-            if isinstance(e, FileNotFoundError):
-                # A missing local binary (npx for the oauth proxy) never heals
-                # between attempts: the four retries used to burn on [WinError 2].
-                raise RuntimeError(f"{backend} necesita un binario que no está: {e}") from e
-            if status in _FATAL_STATUS:
-                raise RuntimeError(f"{model} no existe, la clave no sirve o no hay "
-                                   f"saldo en {backend} (HTTP {status}): {e}") from e
-        if attempt < retries - 1:
-            wait = _backoff(attempt, status)
-            # `last` names the failure: «sin texto» covered a timeout, a refusal
-            # and a model that spent its whole budget thinking, and those are
-            # three different bugs.
-            ui.log(f"[llm] {model}: {'HTTP %d' % status if status else last}"
-                   f"; reintento {attempt + 2}/{retries} en {wait}s")
-            time.sleep(wait)
-    raise RuntimeError(f"{model} falló tras {retries} intentos: {last}")
 
 
 # Set by the wizard: an attended run gets to answer for a dead provider instead
@@ -766,14 +574,8 @@ def chat(model: str, prompt: str, system: str | None = None, *,
             started = time.time()
             beat = _heartbeat(target)
             try:
-                if backend == "claude":
-                    out = claude_chat(target, prompt, system)
-                elif backend == "go":
-                    out = opencode_chat(target, prompt, system)
-                else:
-                    out = hyper_chat(target, prompt, system, temperature=temperature,
-                                     max_tokens=max_tokens, retries=retries,
-                                     backend=backend)
+                out = _send(backend, target, prompt, system, temperature=temperature,
+                            max_tokens=max_tokens, retries=retries)
             finally:
                 beat.set()
             ui.log(f"[llm] {target} respondió en {time.time() - started:.0f}s "

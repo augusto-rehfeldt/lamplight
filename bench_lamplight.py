@@ -39,7 +39,7 @@ def benchmark(models, url, key, output, repeat=1, seed=42):
                         answer = library.send_ai(config, key, system, prompt, ai.MAX_TOKENS, ai.TIMEOUT)
                         request["answer"] = answer
                         return answer
-                    except native.legacy.requests.RequestException as error:
+                    except (native.legacy.requests.RequestException, native.AIConnectionError) as error:
                         # Exception bodies can contain provider diagnostics; keep credentials out of reports.
                         request["error"] = type(error).__name__
                         raise ValueError("Provider connection failed: " + type(error).__name__) from None

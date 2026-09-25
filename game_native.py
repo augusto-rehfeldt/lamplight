@@ -31,6 +31,41 @@ def source_id(value):
     return int(value)
 
 
+class AIConnectionError(ConnectionError):
+    """The player's endpoint could not be reached or timed out. Never carries the key."""
+
+
+HTTP_MESSAGES = {401: "The provider rejected the key. Check AI setup.",
+                 404: "Model or endpoint not found. Check AI setup.",
+                 429: "Provider quota reached. Try later or connect another model."}
+
+
+def chat_request(*, url, key, model, system, prompt, max_tokens, timeout):
+    """One reply from the player's OpenAI-compatible endpoint, run on book writer's
+    shared AIService like every AI call in the workspace. Returns (text, usage):
+    usage is what the provider reported, or None. Errors are player-facing and keyless."""
+    # The player's own endpoint gets exactly the player's key (or none), the cap they set
+    # spelled the common way, and no attribution headers meant for book writer's gateways.
+    overrides = {"base_url": url.rstrip("/"), "api_key": key or "", "timeout": timeout,
+                 "token_param": "max_tokens", "cap_is_ceiling": True, "headers": {}}
+    try:
+        service = legacy.llm.shared_service("openrouter", overrides)
+        text = service.generate_content(prompt, model=model, system=system, max_completion_tokens=max_tokens,
+                                        max_retries=1, wait_for_limits=False)
+    except ValueError:
+        raise
+    except Exception as error:  # noqa: BLE001 - SDK/HTTP errors may echo credentials; map, never forward
+        status = getattr(error, "status_code", None) or getattr(getattr(error, "response", None), "status_code", None)
+        if isinstance(status, int):
+            raise ValueError(HTTP_MESSAGES.get(status, f"The AI provider returned HTTP {status}. Retry or change providers.")) from None
+        if type(error).__name__ == "IncompleteGenerationError":
+            raise ValueError("The model exhausted the response token limit. Try another model.") from None
+        if type(error).__name__ == "ProviderLimitReached":
+            raise ValueError(HTTP_MESSAGES[429]) from None
+        raise AIConnectionError("AI connection failed or timed out") from None
+    return text, service.last_usage
+
+
 class Library:
     def __init__(self, directory: pathlib.Path):
         self.path = directory / "library.json"
@@ -114,47 +149,23 @@ class Library:
                 self.usage = usage
 
     def _send_ai(self, config, key, system, prompt, max_tokens, timeout, record):
-        headers = {"Content-Type": "application/json"}
-        if key:
-            headers["Authorization"] = "Bearer " + key
-        start = time.monotonic()
-        with legacy.requests.post(config["url"].rstrip("/") + "/chat/completions", headers=headers,
-                json=dict(model=config["model"], messages=[dict(role="system", content=system), dict(role="user", content=prompt)], max_tokens=max_tokens, stream=False),
-                timeout=(5, timeout), allow_redirects=False, stream=True) as response:
-            if response.status_code != 200:
-                code = response.status_code
-                raise ValueError({401:"The provider rejected the key. Check AI setup.", 404:"Model or endpoint not found. Check AI setup.", 429:"Provider quota reached. Try later or connect another model."}.get(code, f"The AI provider returned HTTP {code}. Retry or change providers."))
-            raw = bytearray()
-            for chunk in response.iter_content(4096):
-                raw.extend(chunk)
-                if len(raw) > 100_000 or time.monotonic()-start > timeout:
-                    raise ValueError("The AI response exceeded its size or time limit")
-            value = json.loads(raw)
-            if not isinstance(value, dict):
-                raise ValueError("The endpoint did not return a compatible chat response")
-            reported = value.get("usage") or {}
-            if not isinstance(reported, dict):
-                reported = {}
-            for field, provider_field in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens")):
-                count = reported.get(provider_field)
-                if type(count) is int and count >= 0:
-                    record[field] = count
-            choice = value["choices"][0]
-            if not isinstance(choice, dict):
-                raise ValueError("The endpoint did not return a compatible chat response")
-            if choice.get("finish_reason") == "length":
-                raise ValueError("The model exhausted the response token limit. Try another model.")
-            answer = choice["message"]["content"]
-            if not isinstance(answer, str) or not answer.strip():
-                raise ValueError("The model returned no text. Choose a chat model in AI setup.")
-            if len(answer) > 12000:
-                raise ValueError("The AI response exceeded its text limit")
-            # ponytail: character-based estimates only when usage is absent; provider
-            # reported counts remain separate so estimates never masquerade as billing.
-            for field, characters in (("prompt_tokens", len(system) + len(prompt)), ("completion_tokens", len(answer))):
-                if type(reported.get(field)) is not int or reported[field] < 0:
-                    record["estimated_tokens"] += math.ceil(characters / 4)
-            return answer
+        answer, reported = chat_request(url=config["url"], key=key, model=config["model"], system=system,
+                                        prompt=prompt, max_tokens=max_tokens, timeout=timeout)
+        reported = reported if isinstance(reported, dict) else {}
+        for field, provider_field in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens")):
+            count = reported.get(provider_field)
+            if type(count) is int and count >= 0:
+                record[field] = count
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("The model returned no text. Choose a chat model in AI setup.")
+        if len(answer) > 12000:
+            raise ValueError("The AI response exceeded its text limit")
+        # ponytail: character-based estimates only when usage is absent; provider
+        # reported counts remain separate so estimates never masquerade as billing.
+        for field, characters in (("prompt_tokens", len(system) + len(prompt)), ("completion_tokens", len(answer))):
+            if type(reported.get(field)) is not int or reported[field] < 0:
+                record["estimated_tokens"] += math.ceil(characters / 4)
+        return answer
 
     def assistant(self, data):
         """Explicit, bounded text requests; no tools, save access or resource authority."""
@@ -280,7 +291,7 @@ class Library:
                     self.commit(state)
                     return dict(slot=self.public_slot(current), name=figure["name"], text=answer, simulation="AI educational fiction · verify against the source.")
             return dict(text=answer, generated=True)
-        except legacy.requests.RequestException:
+        except (legacy.requests.RequestException, AIConnectionError):
             raise ValueError("AI connection failed or timed out. Retry or connect another qualified model; your manuscripts are preserved.") from None
         except (KeyError, IndexError, TypeError, json.JSONDecodeError):
             raise ValueError("The endpoint did not return a compatible chat response") from None
