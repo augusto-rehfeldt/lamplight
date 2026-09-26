@@ -1,4 +1,4 @@
-"""Provider chain and roles for the writing engine, on book writer's shared AI suite.
+"""Provider chain and roles for the writing engine, on the shared ai-suite package.
 
 Two roles are used across the pipeline:
   PRO   - topic selection, outline audit, review, final approval (better judgement)
@@ -396,15 +396,16 @@ def _quota_notice(out: str) -> bool:
     return len(out) < 400 and bool(_QUOTA.search(out))
 
 
-# Every completion runs on book writer's AIService -- the AI suite the whole
+# Every completion runs on the shared ai-suite AIService -- the AI suite the whole
 # workspace shares (music writer, mathforge, book-watch, the games...). This
 # module keeps what is Lamplight's own: the provider chain, PRO/FLASH roles and
 # their per-provider translation, catalogues, key discovery, heartbeat, the
-# interactive recovery and JSON repair. LAMPLIGHT_BOOK_WRITER overrides the path.
-BOOK_WRITER = pathlib.Path(os.environ.get("LAMPLIGHT_BOOK_WRITER")
-                           or ROOT.parent.parent / "book writer")
+# interactive recovery and JSON repair. The sibling ai-suite checkout is used when
+# present (AI_SUITE_DIR overrides it), else the copy vendored into this repository.
+AI_SUITE = pathlib.Path(os.environ.get("AI_SUITE_DIR") or ROOT.parent.parent / "ai-suite")
+SUITE_PATH = AI_SUITE if AI_SUITE.is_dir() else ROOT.parent
 
-# Lamplight's backend names -> book writer's providers. Custom endpoints from the
+# Lamplight's backend names -> ai-suite's providers. Custom endpoints from the
 # game's settings ride the generic OpenAI-compatible client ("openrouter").
 SHARED = {"claude": "claude", "hyper": "hyper", "zen": "opencode-zen",
           "grok": "grok", "go": "opencode-go", "oauth": "openai-oauth"}
@@ -414,15 +415,14 @@ _services_lock = threading.Lock()
 
 
 def shared_service(provider: str, overrides: dict[str, Any]) -> Any:
-    """book writer's AIService for `provider`, with Lamplight's key/endpoint layered
+    """The shared AIService for `provider`, with Lamplight's key/endpoint layered
     on top. One instance per distinct setting, shared by every thread."""
     cache_key = (provider, tuple(sorted(overrides.items())))
     with _services_lock:
         if cache_key not in _services:
-            if str(BOOK_WRITER) not in sys.path:
-                sys.path.insert(0, str(BOOK_WRITER))
-            from ai_book_creator.cli import provider_config_path
-            from ai_book_creator.services.ai_service import AIService
+            if str(SUITE_PATH) not in sys.path:
+                sys.path.insert(0, str(SUITE_PATH))
+            from ai_suite import AIService, provider_config_path
             _services[cache_key] = AIService(
                 config_path=provider_config_path(provider),
                 usage_state_path=str(ROOT.parent / "output" / "shared_ai_usage.json"),
@@ -451,7 +451,7 @@ def _send(backend: str, model: str, prompt: str, system: str | None, *,
         if backend not in SHARED:
             overrides["headers"] = {}  # a custom endpoint gets no book-writer attribution headers
         if backend not in ("go", "oauth"):
-            # go reads opencode's own login and oauth the local proxy, inside book writer.
+            # go reads opencode's own login and oauth the local proxy, inside ai-suite.
             key = _key_for(spec)
             if not key:
                 # RuntimeError, not SystemExit: this provider may be one link in a

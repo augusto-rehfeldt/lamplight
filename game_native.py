@@ -41,11 +41,11 @@ HTTP_MESSAGES = {401: "The provider rejected the key. Check AI setup.",
 
 
 def chat_request(*, url, key, model, system, prompt, max_tokens, timeout):
-    """One reply from the player's OpenAI-compatible endpoint, run on book writer's
+    """One reply from the player's OpenAI-compatible endpoint, run on ai-suite's
     shared AIService like every AI call in the workspace. Returns (text, usage):
     usage is what the provider reported, or None. Errors are player-facing and keyless."""
     # The player's own endpoint gets exactly the player's key (or none), the cap they set
-    # spelled the common way, and no attribution headers meant for book writer's gateways.
+    # spelled the common way, and no attribution headers meant for ai-suite's gateways.
     overrides = {"base_url": url.rstrip("/"), "api_key": key or "", "timeout": timeout,
                  "token_param": "max_tokens", "cap_is_ceiling": True, "headers": {}}
     try:

@@ -987,33 +987,7 @@ def draft(run: Run, topic: dict, outline: dict, sources: list[research.Source]) 
                     previo=previo, evitar=_banned(parts + bodies),
                     fuentes=_sources_block(sources, sec.get("fuentes", []), ctx_chars))
                     + _lang())
-                best = None
-                for attempt in range(2):
-                    body = _strip_preamble(llm.chat(
-                        llm.PRO if DRAFT_ROLE == "pro" else llm.FLASH, prompt, temperature=0.9))
-                    count = len(body.split())
-                    right_lang = style.detect_language(body) in (None, LANG)
-                    if 0.9 * words <= count <= 1.1 * words and right_lang:
-                        break
-                    if right_lang and (best is None or abs(count - words) < abs(len(best.split()) - words)):
-                        best = body
-                    if attempt:
-                        # The ±10% asked for is a target, not a gate: killing an
-                        # hours-long run because a section came back at 1.2x is a
-                        # worse outcome than keeping it. Only a section that is
-                        # plainly amputated or in the wrong language stops the run.
-                        if best is not None and 0.7 * words <= len(best.split()) <= 1.5 * words:
-                            body = best
-                            run.log(f"[borrador] me quedo con {len(body.split())} palabras "
-                                    f"(pedidas {words})")
-                            break
-                        raise RuntimeError(f"Sección {label}: respuesta fuera de extensión o idioma "
-                                           f"({count} palabras; idioma pedido: {LANG}). No se guardó en caché.")
-                    run.log(f"[borrador] {count} palabras o idioma incorrecto; pido una versión completa")
-                    prompt += (f"\n\nLa respuesta anterior tenía {count} palabras. Escribí una versión "
-                               f"completa de {int(words * 0.9)} a {int(words * 1.1)} palabras en "
-                               f"{'inglés' if LANG == 'en' else 'español'}. Desarrollá las implicaciones "
-                               "de las fuentes sin repetir ni inventar datos; comprobá la extensión.")
+                body = _draft_chunk(run, prompt, words, label)
                 cache.write_text(body, encoding="utf-8")
             # Cached chunks are split too: the numbering of the *next* section
             # depends on how many notes came before it, so a resume has to count
@@ -1027,6 +1001,57 @@ def draft(run: Run, topic: dict, outline: dict, sources: list[research.Source]) 
     if notas:
         parts.append(("## Notes" if LANG == "en" else "## Notas") + "\n\n" + "\n\n".join(notas))
     return "\n\n".join(parts)
+
+
+DRAFT_TRIES = 3   # replies asked of each link before the chunk moves to the next one
+
+
+def _draft_chunk(run: Run, prompt: str, words: int, label: str) -> str:
+    """One drafted chunk, retried until it is usable.
+
+    A stub (a free-tier model answering 12 words, twice) is a bad link, not a
+    bad section: after DRAFT_TRIES replies the chunk is handed to each backup in
+    the chain, head first. Only when every link has failed does it raise —
+    there is nothing left to cache, and an amputated section must never be.
+    """
+    best = None
+    chain = list(llm.CHAIN)
+    try:
+        for k in range(max(1, len(chain))):
+            rotated = chain[k:] + chain[:k]
+            llm.CHAIN = rotated
+            if k:
+                run.log(f"[borrador] {label}: paso la sección a {rotated[0]}")
+            ask = prompt
+            for attempt in range(DRAFT_TRIES):
+                body = _strip_preamble(llm.chat(
+                    llm.PRO if DRAFT_ROLE == "pro" else llm.FLASH, ask, temperature=0.9))
+                count = len(body.split())
+                right_lang = style.detect_language(body) in (None, LANG)
+                if 0.9 * words <= count <= 1.1 * words and right_lang:
+                    return body
+                if right_lang and (best is None or abs(count - words) < abs(len(best.split()) - words)):
+                    best = body
+                # The ±10% asked for is a target, not a gate: killing an
+                # hours-long run because a section came back at 1.2x is a
+                # worse outcome than keeping it. Only a section that is
+                # plainly amputated or in the wrong language keeps retrying.
+                if attempt and best is not None and 0.7 * words <= len(best.split()) <= 1.5 * words:
+                    run.log(f"[borrador] me quedo con {len(best.split())} palabras (pedidas {words})")
+                    return best
+                run.log(f"[borrador] {count} palabras o idioma incorrecto "
+                        f"(«{' '.join(body.split()[:15])}»); reintento")
+                ask = prompt + (
+                    f"\n\nLa respuesta anterior tenía {count} palabras. Escribí una versión "
+                    f"completa de {int(words * 0.9)} a {int(words * 1.1)} palabras en "
+                    f"{'inglés' if LANG == 'en' else 'español'}. Desarrollá las implicaciones "
+                    "de las fuentes sin repetir ni inventar datos; comprobá la extensión.")
+    finally:
+        # _recover() inside chat may have repointed the chain; keep that choice.
+        if llm.CHAIN == rotated:
+            llm.CHAIN = chain
+    raise RuntimeError(f"Sección {label}: ningún proveedor devolvió una sección completa "
+                       f"en {LANG}. No se guardó en caché.")
 
 
 def _apparatus_rules(spec: dict, words: int, first: int) -> str:

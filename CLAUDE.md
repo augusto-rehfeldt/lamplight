@@ -11,8 +11,9 @@ build (`game/`, served by `game_server.py`) and a local Python service
   bundled in `engine/`; `game_server.py` puts it on `sys.path` (flat imports) and
   redirects its output/library folders under `output/lamplight/`. Provider keys come
   from this folder's `.env` (see `.env.example`).
-- One AI suite: every completion runs on book writer's AIService (sibling `book writer`
-  folder, or `LAMPLIGHT_BOOK_WRITER`). `engine/llm.py` keeps the chain, roles, catalogues,
+- One AI suite: every completion runs on the shared ai-suite AIService (sibling `ai-suite`
+  checkout, or `AI_SUITE_DIR`; a fresh clone uses the vendored `ai_suite/` copy, synced by
+  ai-suite's `sync.py` -- never edit it here). `engine/llm.py` keeps the chain, roles, catalogues,
   key discovery and recovery, and sends each link through `shared_service()`/`_send()`
   (streamed, fail-fast). The in-game AI goes through `game_native.chat_request()`. Tests
   patch those seams; no SDK client or raw completion request lives here.

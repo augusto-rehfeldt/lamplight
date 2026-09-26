@@ -1,4 +1,4 @@
-"""The writing engine's router runs every completion on book writer's shared AIService.
+"""The writing engine's router runs every completion on the shared ai-suite AIService.
 
 Offline: the service factory is replaced by a fake; no provider, CLI or proxy is touched.
 Run: python -B -m unittest -q test_engine_llm
@@ -91,7 +91,7 @@ class RouterTests(unittest.TestCase):
         llm.chat(llm.FLASH, "p")
         provider, overrides = self.built[0]
         self.assertEqual(provider, "opencode-go")
-        self.assertNotIn("api_key", overrides)  # book writer reads opencode's own login
+        self.assertNotIn("api_key", overrides)  # ai-suite reads opencode's own login
         self.assertEqual(self.services["opencode-go"].calls[0][1]["model"], "deepseek-v4-pro")
 
     def test_custom_provider_only_ever_gets_its_own_key(self):
@@ -121,20 +121,18 @@ class RouterTests(unittest.TestCase):
 
 
 class SharedServiceTests(unittest.TestCase):
-    def test_builds_book_writers_service_once_per_setting(self):
+    def test_builds_the_suites_service_once_per_setting(self):
         built = []
-        service_module = MagicMock()
-        service_module.AIService.side_effect = lambda **kw: built.append(kw) or object()
-        cli = MagicMock()
-        cli.provider_config_path.side_effect = lambda name: f"/cfg/{name}.json"
-        modules = {"ai_book_creator": MagicMock(), "ai_book_creator.cli": cli,
-                   "ai_book_creator.services": MagicMock(), "ai_book_creator.services.ai_service": service_module}
+        suite = MagicMock()
+        suite.AIService.side_effect = lambda **kw: built.append(kw) or object()
+        suite.provider_config_path.side_effect = lambda name: f"/cfg/{name}.json"
+        modules = {"ai_suite": suite}
         with patch.dict(sys.modules, modules), patch.object(sys, "path", list(sys.path)), \
                 patch.dict(llm._services, clear=True):
             first = llm.shared_service("hyper", {"api_key": "k"})
             self.assertIs(llm.shared_service("hyper", {"api_key": "k"}), first)
             llm.shared_service("hyper", {"api_key": "other"})
-            self.assertIn(str(llm.BOOK_WRITER), sys.path)
+            self.assertIn(str(llm.SUITE_PATH), sys.path)
         self.assertEqual(len(built), 2)
         self.assertEqual(built[0]["config_path"], "/cfg/hyper.json")
         self.assertEqual(built[0]["config_overrides"], {"api_key": "k"})
